@@ -81,12 +81,10 @@ def SelectMotions() {
 }    
 
 def installed() {
-	log.debug 'installed called.'
 	initialize()
 }
 
 def updated() {
-	log.debug 'updated called.'
 	unsubscribe()
 	initialize()
 }
@@ -104,7 +102,6 @@ def initialize() {
 def motionOnHandler(evt) {
 	// TODO: Only send commands if the current time is considered 'valid'
     if(dimLevel) switches.each {if(it.currentLevel) it.setLevel(dimLevel) else it.on()} else switches.on()
-    state.switchesOn = true
 }
 
 /**
