@@ -1,0 +1,190 @@
+/**
+ *  Motion Sensor Lights Demo
+ *
+ *  Copyright 2015 Matthew Salvatore
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ *  in compliance with the License. You may obtain a copy of the License at:
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+ *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+ *  for the specific language governing permissions and limitations under the License.
+ *
+ */
+definition(
+    name: "Motion Controlled Lights Demo",
+    namespace: "msalvatore",
+    author: "Matthew Salvatore",
+    description: "Testing out integrating motion sensors with light switches",
+    category: "My Apps",
+    iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
+    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
+    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png")
+
+
+
+preferences {
+	page(name: "SelectOptions")
+	page(name: "SelectMotions")
+	page(name: "timeIntervalInput", title: "Only during a certain time") {
+		section {
+			input "starting", "time", title: "Starting", required: false
+			input "ending", "time", title: "Ending", required: false
+		}
+	}
+}
+
+def SelectOptions() {
+	log.debug 'SelectOptions called.'
+	dynamicPage(name: "SelectOptions", title: "Choose switches and motion sensor(s)", nextPage: "SelectMotions", uninstall: true) {
+
+		section {
+			input "switches", "capability.switch", title: "Choose switches", required: true, multiple: true
+		}
+    
+		section {
+			input "motions", "capability.motionSensor", title: "Choose motion sensor(s) for ON", required: true, multiple: true
+		}
+        
+		section {
+			label title: "Assign a name:", required: false
+		}
+
+	}
+}
+    
+def SelectMotions() {
+	log.debug 'SelectMotions called.'
+	dynamicPage(name: "SelectMotions", title: "Set dimmer and motion off time", install: true, uninstall: false) {
+
+		section("You can also:"){
+			input "dimLevel", "number", title: "Set dimmers to this level", required: false, multiple: false, description: "0 to 99"
+			input "turnOff", "boolean", title: "Turn off when motion stops", required: false
+			input "offMotions", "capability.motionSensor", title: "More motion sensor(s) for OFF?", required: false, multiple: true
+			input "minutes", "number", title: "Wait this many minutes to turn off after motion stops (optional)", required: false
+		}
+    
+		section(title: "More options", hidden: hideOptionsSection(), hideable: true) {
+
+			def timeLabel = timeIntervalLabel()
+
+			href "timeIntervalInput", title: "Only during a certain time", description: timeLabel ?: "Tap to set", state: timeLabel ? "complete" : null
+
+			input "days", "enum", title: "Only on certain days of the week", multiple: true, required: false,
+				options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+			input "modes", "mode", title: "Only when mode is", multiple: true, required: false
+		}
+	}
+}    
+
+def installed() {
+	initialize()
+}
+
+def updated() {
+	unsubscribe()
+	initialize()
+}
+
+def initialize() {
+	subscribe(motions, "motion.active", motionOnHandler)
+	subscribe(motions, "motion.inactive", motionOffHandler)
+}
+
+/**
+ * Handles 'motion.active' triggered events. When motion is detected, send a command to all lights
+ * to turn them on. If the light is already on, the command is still sent. Note that lights are only
+ * turned on if the current time falls within the acceptable time range.
+ */
+def motionOnHandler(evt) {
+	// TODO: Only send commands if the current time is considered 'valid'
+    if(dimLevel) switches.each {if(it.currentLevel) it.setLevel(dimLevel) else it.on()} else switches.on()
+}
+
+/**
+ * Handles 'motion.inactive' triggered events. When no motion is detected, send a command to all lights
+ * to turn them off. The commands are only sent if the current time is within the acceptable time range, 
+ * and if all other motion sensors are also in a state of 'inactive'. If any other sensors are 'active',
+ * no commands are sent.
+ */
+def motionOffHandler(evt) {
+	// TODO: Do we care about whether or not we are within a 'valid' time? We don't want to leave lights on... Revisit this.
+    log.debug "Motion: ${motions.first().currentMotion}"
+    // warning: Sometimes currentMotion is null, possibly when a connection has never been established (e.g. the first time the app is run). Check for 'active' rather than 'inactive'.
+    def allSensorsInactive = motions.every { 
+    	log.debug "Sensor currentMotion value: ${it.currentMotion}"
+        it.currentMotion != 'active'
+    }
+    log.debug "Handling a motion.inactive event. All sensors inactive: $allSensorsInactive"
+    if(allSensorsInactive) {
+    	// TODO: Introduce delay. See original app for example.
+        switches.each { it.off() } 
+    }
+}
+
+def switchesOff() {
+	log.debug 'switches off called.'
+	switches.off()
+}
+
+// execution filter methods
+private getAllOk() {
+	def result = modeOk && daysOk && timeOk
+    log.debug "getAllOk called, returning $result."
+    result
+}
+
+private getModeOk() {
+	def result = !modes || modes.contains(location.mode)
+//	log.trace "modeOk = $result"
+	result
+}
+
+private getDaysOk() {
+	def result = true
+	if (days) {
+		def df = new java.text.SimpleDateFormat("EEEE")
+		if (location.timeZone) {
+			df.setTimeZone(location.timeZone)
+		}
+		else {
+			df.setTimeZone(TimeZone.getTimeZone("America/New_York"))
+		}
+		def day = df.format(new Date())
+		result = days.contains(day)
+	}
+//	log.trace "daysOk = $result"
+	result
+}
+
+private getTimeOk() {
+	def result = true
+	if (starting && ending) {
+		def currTime = now()
+//		def start = timeToday(starting).time
+		def start = timeToday(starting,location.timeZone).time
+//		def stop = timeToday(ending).time
+		def stop = timeToday(ending,location.timeZone).time
+		result = start < stop ? currTime >= start && currTime <= stop : currTime <= stop || currTime >= start
+	}
+//	log.trace "timeOk = $result"
+	result
+}
+
+private hhmm(time, fmt = "h:mm a") {
+	def t = timeToday(time, location.timeZone)
+	def f = new java.text.SimpleDateFormat(fmt)
+	f.setTimeZone(location.timeZone ?: timeZone(time))
+	f.format(t)
+}
+
+private hideOptionsSection() {
+	(starting || ending || days || modes) ? false : true
+}
+
+private timeIntervalLabel() {
+	(starting && ending) ? hhmm(starting) + "-" + hhmm(ending, "h:mm a z") : ""
+}
