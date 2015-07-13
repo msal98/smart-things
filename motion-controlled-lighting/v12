@@ -1,0 +1,119 @@
+/**
+ *  Motion Sensor Lights Demo
+ *
+ *  Copyright 2015 Matthew Salvatore
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ *  in compliance with the License. You may obtain a copy of the License at:
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+ *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+ *  for the specific language governing permissions and limitations under the License.
+ *
+ */
+definition(
+    name: "Motion Controlled Lights Demo",
+    namespace: "msalvatore",
+    author: "Matthew Salvatore",
+    description: "Testing out integrating motion sensors with light switches",
+    category: "My Apps",
+    iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
+    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
+    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png")
+
+preferences {
+	page(name: "SelectOptions")
+}
+
+def SelectOptions() {
+	dynamicPage(name: "SelectOptions", title: "Select switches and motion sensors", nextPage: "SelectMotions", uninstall: true) {
+
+		section {
+			input "switches", "capability.switch", title: "Choose switches:", required: true, multiple: true
+		}
+    
+		section {
+			input "motions", "capability.motionSensor", title: "Choose motion sensors:", required: true, multiple: true
+		}
+        
+		section {
+			label title: "Assign a name:", required: false
+		}
+
+		section {
+        	input( name: 'userEnteredAttempts', type: 'number', title: 'How many command retries?', required: true )
+        }
+        
+        section {
+        	input( name: 'userEnteredCommandInterval', type: 'number', title: 'How long to wait between command attempts, in milliseconds?', required: true )
+        }
+        
+        section {
+        	input( name: 'userEnteredMotionStopDelay', type: 'number', title: 'How long to wait after motion stops to turn off the lights, in seconds?', required: true )
+        }
+	}
+} 
+
+def installed() {
+	initialize()
+}
+
+def updated() {
+	unsubscribe()
+	initialize()
+}
+
+def initialize() {
+	subscribe(motions, "motion.active", handleMotionActiveEvent)
+	subscribe(motions, "motion.inactive", handleMotionInactiveEvent)
+}
+
+def handleMotionActiveEvent(evt) {
+	unschedule( sendSwitchOffCommandsWrapper )	// make sure that no delayed switch off commands are pending
+	log.warn 'The motion.active event handler has been called. Time to turn on the lights!'
+    sendSwitchOnCommands( userEnteredAttempts, userEnteredCommandInterval )
+}
+
+/**
+ * Sends commands to turn on all light switches the specified number of times.
+ * @param count how many times to send the commands.
+ * @param delayMillis how long (in milliseconds) to wait between sending commands.
+ */
+def sendSwitchOnCommands( int count, int delayMillis ) {
+	log.warn "About to emit 'on' commands $count times with a ${delayMillis}ms delay between each set of commands."
+	count.times {
+    	log.warn "[try ${it+1}] Sending commands to turn on switches, then sleeping for ${delayMillis}ms."
+        switches.on()
+        pause( delayMillis )
+    }
+}
+
+def handleMotionInactiveEvent(evt) {
+	log.warn 'The motion.inactive event handler has been called. Time to schedule the lights to be turned off in the near future.'
+    runIn( userEnteredMotionStopDelay, sendSwitchOffCommandsWrapper )
+}
+
+/**
+ * A simple wrapper method that calls sendSwitchOffCommands(...). This method takes no arguments, making it easier
+ * to use with the runIn(...) command.
+ */
+def sendSwitchOffCommandsWrapper() {
+	log.warn "No motion has been detected for $userEnteredMotionStopDelay seconds, so commands will now be sent to turn off the lights."
+	sendSwitchOffCommands( userEnteredAttempts, userEnteredCommandInterval )
+}
+
+/**
+ * Sends commands to turn off all light switches the specified number of times.
+ * @param count how many times to send the commands.
+ * @param delayMillis how long (in milliseconds) to wait between sending commands.
+ */
+def sendSwitchOffCommands( int count, int delayMillis ) {
+	log.warn "About to emit 'off' commands $count times with a ${delayMillis}ms delay between each set of commands."
+	count.times {
+    	log.warn "[try ${it+1}] Sending commands to turn off switches, then sleeping for ${delayMillis}ms."
+        switches.off()
+        pause( delayMillis )
+    }
+}
